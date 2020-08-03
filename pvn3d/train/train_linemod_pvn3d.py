@@ -32,6 +32,7 @@ from collections import namedtuple
 import pickle as pkl
 
 
+FAST_RUN = False
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (30000, rlimit[1]))
 
@@ -92,6 +93,11 @@ parser.add_argument(
     default="ape",
     help="Target object. (ape, benchvise, cam, can, cat, driller," +
     "duck, eggbox, glue, holepuncher, iron, lamp, phone)"
+)
+parser.add_argument(
+    "--no_render",
+    action='store_true',
+    help="No render data"
 )
 parser.add_argument(
     "--test_occ",
@@ -280,9 +286,10 @@ class Trainer(object):
         eval_dict = {}
         total_loss = 0.0
         count = 1.0
-        for i, data in tqdm.tqdm(
-            enumerate(d_loader), leave=False, desc="val"
-        ):
+        for i, data in enumerate(d_loader):
+        # for i, data in tqdm.tqdm(
+        #     enumerate(d_loader), leave=False, desc="val"
+        # ):
             self.optimizer.zero_grad()
 
             _, loss, eval_res = self.model_fn(
@@ -373,6 +380,7 @@ class Trainer(object):
                         self.bnm_scheduler.step(it)
 
                     self.optimizer.zero_grad()
+                    # core forward step
                     _, loss, res = self.model_fn(self.model, batch)
 
                     loss.backward()
@@ -388,7 +396,8 @@ class Trainer(object):
                         self.viz.update("train", it, res)
 
                     eval_flag, eval_frequency = is_to_eval(epoch, it)
-                    if eval_flag:
+                    # TODO: Fast run option
+                    if eval_flag or FAST_RUN:
                         pbar.close()
 
                         if test_loader is not None:
@@ -430,16 +439,15 @@ class Trainer(object):
 if __name__ == "__main__":
     print("cls_type: ", args.cls)
     if not args.eval_net:
-        train_ds = LM_Dataset('train', cls_type=args.cls)
+        train_ds = LM_Dataset('train', cls_type=args.cls, has_render=not args.no_render)
         train_loader = torch.utils.data.DataLoader(
             train_ds, batch_size=config.mini_batch_size, shuffle=True,
-            num_workers=20, worker_init_fn=worker_init_fn
+            num_workers=32, worker_init_fn=worker_init_fn
         )
         val_ds = LM_Dataset('val', cls_type=args.cls)
         val_loader = torch.utils.data.DataLoader(
             val_ds, batch_size=config.val_mini_batch_size, shuffle=False,
-            num_workers=10
-        )
+            num_workers=3232        )
     else:
         if args.test_occ:
             test_ds = OCC_LM_Dataset('test', cls_type=args.cls)

@@ -20,7 +20,8 @@ DEBUG = False
 
 class LM_Dataset():
 
-    def __init__(self, dataset_name, cls_type="duck"):
+    def __init__(self, dataset_name, cls_type="duck", has_render=False):
+        self.has_render = has_render
         self.config = Config(dataset_name='linemod', cls_type=cls_type)
         self.bs_utils = Basic_Utils(self.config)
         self.dataset_name = dataset_name
@@ -34,6 +35,7 @@ class LM_Dataset():
         self.cls_type = cls_type
         self.cls_id = self.obj_dict[cls_type]
         print("cls_id in lm_dataset.py", self.cls_id)
+        # dataset root is the parent folder of Linemod_prepreocessed
         self.root = os.path.join(self.config.lm_root, 'Linemod_preprocessed')
         self.cls_root = os.path.join(self.root, "data/%02d/" % self.cls_id)
         self.rng = np.random
@@ -49,16 +51,18 @@ class LM_Dataset():
             rnd_img_pth = os.path.join(
                 self.root, "renders/{}/file_list.txt".format(cls_type)
             )
-            self.rnd_lst = self.bs_utils.read_lines(rnd_img_pth)
+            self.rnd_lst = self.bs_utils.read_lines(rnd_img_pth) if self.has_render else None
+            # if no render ,then None
 
             fuse_img_pth = os.path.join(
                 self.root, "fuse/{}/file_list.txt".format(cls_type)
             )
+            # fuse dataset is optional, but not rnd.
             try:
                 self.fuse_lst = self.bs_utils.read_lines(fuse_img_pth)
             except: # no fuse dataset
                 self.fuse_lst = self.rnd_lst
-            self.all_lst = self.real_lst + self.rnd_lst + self.fuse_lst
+            self.all_lst = self.real_lst + self.rnd_lst + self.fuse_lst if self.has_render else self.real_lst
         else:
             self.add_noise = False
             self.pp_data = None
@@ -70,14 +74,14 @@ class LM_Dataset():
                 print('Finish loading valtestset.')
             else:
                 tst_img_pth = os.path.join(
-                    self.cls_root, "test.txt"
+                    self.cls_root, "test_small.txt"
                 )
                 self.tst_lst = self.bs_utils.read_lines(tst_img_pth)
                 self.all_lst = self.tst_lst
         print("{}_dataset_size: ".format(dataset_name), len(self.all_lst))
 
     def real_syn_gen(self, real_ratio=0.3):
-        if self.rng.rand() < real_ratio: # real
+        if (not self.has_render) or self.rng.rand() < real_ratio: # real
             n_imgs = len(self.real_lst)
             idx = self.rng.randint(0, n_imgs)
             pth = self.real_lst[idx]
@@ -163,7 +167,7 @@ class LM_Dataset():
 
     def add_real_back(self, rgb, labels, dpt, dpt_msk):
         real_item = self.real_gen()
-        with Image.open(os.path.join(self.cls_root, "depth/{}.png".format(real_item))) as di:
+        with Image.open(os.path.join(self.cls_root, "depth_est/{}.png".format(real_item))) as di:
             real_dpt = np.array(di)
         with Image.open(os.path.join(self.cls_root, "mask/{}.png".format(real_item))) as li:
             bk_label = np.array(li)
@@ -174,13 +178,16 @@ class LM_Dataset():
             bk_label_3c = bk_label
             bk_label = bk_label[:, :, 0]
         with Image.open(os.path.join(self.cls_root, "rgb/{}.png".format(real_item))) as ri:
+            # mask original object from rgb picture
             back = np.array(ri)[:, :, :3] * bk_label_3c
             back = back[:, :, ::-1].copy()
+        # mask original object from depth map
         dpt_back = real_dpt.astype(np.float32) * bk_label.astype(np.float32)
 
         msk_back = (labels <= 0).astype(rgb.dtype)
         msk_back = np.repeat(msk_back[:, :, None], 3, 2)
-        imshow("msk_back", msk_back)
+        # imshow("msk_back", msk_back)
+        #
         rgb = rgb * (msk_back==0).astype(rgb.dtype) + back * msk_back
 
         dpt = dpt * (dpt_msk > 0).astype(dpt.dtype) + \
@@ -190,6 +197,7 @@ class LM_Dataset():
     def get_item(self, item_name):
         try:
             if "pkl" in item_name:
+                # render data reading
                 data = pkl.load(open(item_name, "rb"))
                 dpt = data['depth']
                 rgb = data['rgb']
@@ -198,12 +206,14 @@ class LM_Dataset():
                 RT = data['RT']
                 rnd_typ = data['rnd_typ']
                 if rnd_typ == "fuse":
+                    # fuse data use cls_id as mask
                     labels = (labels == self.cls_id).astype("uint8")
                 else:
+                    # none fuse data only need to find the only mask
                     labels = (labels > 0).astype("uint8")
                 cam_scale = 1.0
             else:
-                with Image.open(os.path.join(self.cls_root, "depth/{}.png".format(item_name))) as di:
+                with Image.open(os.path.join(self.cls_root, "depth_est/{}.png".format(item_name))) as di:
                     dpt = np.array(di)
                 with Image.open(os.path.join(self.cls_root, "mask/{}.png".format(item_name))) as li:
                     labels = np.array(li)
@@ -226,7 +236,7 @@ class LM_Dataset():
                 rnd_typ = 'real'
                 K = self.config.intrinsic_matrix["linemod"]
                 cam_scale = 1000.0
-            rgb = rgb[:, :, ::-1].copy()
+            rgb = rgb[:, :, ::-1].copy() # reverse the channel(due to PIL BGR problems)
             msk_dp = dpt > 1e-6
             if len(labels.shape) > 2:
                 labels = labels[:, :, 0]
@@ -259,18 +269,19 @@ class LM_Dataset():
                 c_mask = np.zeros(len(choose_2), dtype=int)
                 c_mask[:self.config.n_sample_points] = 1
                 np.random.shuffle(c_mask)
-                choose_2 = choose_2[c_mask.nonzero()]
+                choose_2 = choose_2[c_mask.nonzero()]  # choose_2 represent random pick cloud sample index
             else:
                 choose_2 = np.pad(choose_2, (0, self.config.n_sample_points-len(choose_2)), 'wrap')
 
             cld_rgb = np.concatenate((cld, rgb_pt), axis=1)
             cld_rgb = cld_rgb[choose_2, :]
             cld = cld[choose_2, :]
-            normal = self.get_normal(cld)[:, :3]
+            # mask rgb and cld BACKGROUND using random picked sampled points
+            normal = self.get_normal(cld)[:, :3]  # get normal vector for each points, last dim is useless(curvatures)
             normal[np.isnan(normal)] = 0.0
-            cld_rgb_nrm = np.concatenate((cld_rgb, normal), axis=1)
-            choose = choose[:, choose_2]
-            labels = labels[choose_2].astype(np.int32)
+            cld_rgb_nrm = np.concatenate((cld_rgb, normal), axis=1)  # cld rgb and normal all in one tensor
+            choose = choose[:, choose_2]  # choose is xy map, which choose_2 is idx of choose
+            labels = labels[choose_2].astype(np.int32)  # labels is the object mask of the picked point
 
             RTs = np.zeros((self.config.n_objects, 3, 4))
             kp3ds = np.zeros((self.config.n_objects, self.config.n_keypoints, 3))
@@ -278,17 +289,17 @@ class LM_Dataset():
             cls_ids = np.zeros((self.config.n_objects, 1))
             kp_targ_ofst = np.zeros((self.config.n_sample_points, self.config.n_keypoints, 3))
             ctr_targ_ofst = np.zeros((self.config.n_sample_points, 3))
-            for i, cls_id in enumerate([1]):
+            for i, cls_id in enumerate([1]):  # duplicate from YCB-dataset, here i is 0 and cls_id is 1
                 RTs[i] = RT
                 r = RT[:, :3]
                 t = RT[:, 3]
 
-                ctr = self.bs_utils.get_ctr(self.cls_type, ds_type="linemod")[:, None]
-                ctr = np.dot(ctr.T, r.T) + t
+                ctr = self.bs_utils.get_ctr(self.cls_type, ds_type="linemod")[:, None]  # center of the bbox
+                ctr = np.dot(ctr.T, r.T) + t  # rotate ctr point
                 ctr3ds[i, :] = ctr[0]
-                msk_idx = np.where(labels == cls_id)[0]
+                msk_idx = np.where(labels == cls_id)[0]  # mask of the object index
 
-                target_offset = np.array(np.add(cld, -1.0*ctr3ds[i, :]))
+                target_offset = np.array(np.add(cld, -1.0*ctr3ds[i, :]))  # Put object center to the middle of cld
                 ctr_targ_ofst[msk_idx,:] = target_offset[msk_idx, :]
                 cls_ids[i, :] = np.array([1])
 
@@ -297,7 +308,7 @@ class LM_Dataset():
                     kp_type = 'farthest'
                 else:
                     kp_type = 'farthest{}'.format(self.config.n_keypoints)
-                kps = self.bs_utils.get_kps(
+                kps = self.bs_utils.get_kps(  # keypoints
                     self.cls_type, kp_type=kp_type, ds_type='linemod'
                 )
                 kps = np.dot(kps, r.T) + t
@@ -309,7 +320,8 @@ class LM_Dataset():
                 target_offset = np.array(target).transpose(1, 0, 2)  # [npts, nkps, c]
                 kp_targ_ofst[msk_idx, :, :] = target_offset[msk_idx, :, :]
 
-            # rgb, pcld, cld_rgb_nrm, choose, kp_targ_ofst, ctr_targ_ofst, cls_ids, RTs, labels, kp_3ds, ctr_3ds
+            # rgb, pcld, cld_rgb_nrm(cloud with rgb and norm), choose(erase the background), kp_targ_ofst,
+            # ctr_targ_ofst, cls_ids(class id), RTs, labels, kp_3ds(keypoints), ctr_3ds(center points)
             if DEBUG:
                 return  torch.from_numpy(rgb.astype(np.float32)), \
                         torch.from_numpy(cld.astype(np.float32)), \
@@ -336,7 +348,7 @@ class LM_Dataset():
                     torch.LongTensor(labels.astype(np.int32)), \
                     torch.from_numpy(kp3ds.astype(np.float32)), \
                     torch.from_numpy(ctr3ds.astype(np.float32)),
-        except:
+        except Exception as e:
             return None
 
     def __len__(self):

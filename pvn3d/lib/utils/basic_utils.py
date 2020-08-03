@@ -380,8 +380,9 @@ class Basic_Utils():
 
     def dpt_2_cld(self, dpt, cam_scale, K):
         if len(dpt.shape) > 2:
+            # if there are 3 same channels
             dpt = dpt[:, :, 0]
-        msk_dp = dpt > 1e-6
+        msk_dp = dpt > 1e-6  # threshold
         choose = msk_dp.flatten().nonzero()[0].astype(np.uint32)
         if len(choose) < 1:
             return None, None
@@ -390,11 +391,11 @@ class Basic_Utils():
         xmap_mskd = self.xmap.flatten()[choose][:, np.newaxis].astype(np.float32)
         ymap_mskd = self.ymap.flatten()[choose][:, np.newaxis].astype(np.float32)
 
-        pt2 = dpt_mskd / cam_scale
+        pt2 = dpt_mskd / cam_scale  # Z-Axis
         cam_cx, cam_cy = K[0][2], K[1][2]
         cam_fx, cam_fy = K[0][0], K[1][1]
-        pt0 = (ymap_mskd - cam_cx) * pt2 / cam_fx
-        pt1 = (xmap_mskd - cam_cy) * pt2 / cam_fy
+        pt0 = (ymap_mskd - cam_cx) * pt2 / cam_fx  # X-Axis
+        pt1 = (xmap_mskd - cam_cy) * pt2 / cam_fy  # Y-Axis
         cld = np.concatenate((pt0, pt1, pt2), axis=1)
         return cld, choose
 
@@ -581,7 +582,7 @@ class Basic_Utils():
             self.ycb_cls_ctr_dict[cls] = ctr
         else:
             if cls in self.lm_cls_ctr_dict.keys():
-                return self.lm_cls_ctr_dict[cls].copy()
+                return self.lm_cls_ctr_dict[cls].copy()  # cache of previous calculate
             cor_pattern = os.path.join(
                 self.config.lm_kps_dir, '{}/corners.txt'.format(cls),
             )
