@@ -30,6 +30,7 @@ intrinsic_matrix = {
 
 
 def VOCap(rec, prec):
+    # rec is sorted. every elements greater than threashold will be inf.
     idx = np.where(rec != np.inf)
     if len(idx[0]) == 0:
         return 0

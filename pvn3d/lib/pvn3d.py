@@ -228,7 +228,7 @@ class PVN3D(nn.Module):
     """
 
     def __init__(
-        self, num_classes, pcld_input_channels=6, pcld_use_xyz=True,
+        self, num_classes: int, pcld_input_channels=6, pcld_use_xyz=True,
         num_kps=8, num_points=8192
     ):
         super(PVN3D, self).__init__()
@@ -274,24 +274,28 @@ class PVN3D(nn.Module):
             ----------
             pointcloud: Variable(torch.cuda.FloatTensor)
                 (B, N, 3 + input_channels) tensor
+                NUM_points = 12288 on LINEMOD
+                3 + input_channels = 9 on LINEMOD 3 for cloud 3 for rgb and 3 for normal vector
                 Point cloud to run predicts on
                 Each point in the point-cloud MUST
                 be formated as (x, y, z, features...)
             rgb: Variable(torch.cuda.FloatTensor)
                 (B, C, H, W) tensor
+                C = 3, H = 480, W = 640 on LINEMOD
             choose: Variable(torch.cuda.LongTensor)
                 (B, 1, N) tensor
+                NUM_points = 12288 on LINEMOD
                 indexs of choosen points(pixels).
         """
         out_rgb, rgb_seg = self.cnn(rgb)
 
-        bs, di, _, _ = out_rgb.size()
+        bs, di, _, _ = out_rgb.size()  # bs for batch_size, di for dimension.
 
         rgb_emb = out_rgb.view(bs, di, -1)
         choose = choose.repeat(1, di, 1)
         rgb_emb = torch.gather(rgb_emb, 2, choose).contiguous()
 
-        _, N, _ = pointcloud.size()
+        _, N, _ = pointcloud.size()  # N for num_points of point cloud.
         pcld_emb = self.pointnet2(pointcloud)
 
         rgbd_feature = self.rgbd_feat(rgb_emb, pcld_emb)

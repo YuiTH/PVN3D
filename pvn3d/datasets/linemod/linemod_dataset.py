@@ -255,10 +255,11 @@ class LM_Dataset():
             labels = labels.flatten()[choose]
             rgb_lst = []
             for ic in range(rgb.shape[0]):
+                # ic for in channel.
                 rgb_lst.append(
                     rgb[ic].flatten()[choose].astype(np.float32)
                 )
-            rgb_pt = np.transpose(np.array(rgb_lst), (1, 0)).copy()
+            rgb_pt = np.transpose(np.array(rgb_lst), (1, 0)).copy()  # Num_pt X channel
 
             choose = np.array([choose])
             choose_2 = np.array([i for i in range(len(choose[0, :]))])

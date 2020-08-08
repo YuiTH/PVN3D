@@ -1,5 +1,6 @@
 cls='ape'
-tst_mdl=train_log/linemod/checkpoints/${cls}/${cls}_pvn3d_best.pth.tar
+tst_mdl=train_log/linemod/checkpoints/${cls}/${cls}_pvn3d_best_1.5122.pth.tar
+# tst_mdl=train_log/linemod/checkpoints/${cls}/${cls}_pvn3d_best.pth.tar
 python3 -m train.train_linemod_pvn3d -checkpoint $tst_mdl -eval_net --test --cls $cls
 
 

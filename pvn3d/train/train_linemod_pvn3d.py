@@ -31,8 +31,6 @@ import resource
 from collections import namedtuple
 import pickle as pkl
 
-
-FAST_RUN = False
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (30000, rlimit[1]))
 
@@ -85,14 +83,14 @@ parser.add_argument(
 parser.add_argument(
     "-eval_net",
     action='store_true',
-    help="whether is to eval net."
+    help="whether is to eval net.(will not init train model if set)"
 )
 parser.add_argument(
     "--cls",
     type=str,
     default="ape",
     help="Target object. (ape, benchvise, cam, can, cat, driller," +
-    "duck, eggbox, glue, holepuncher, iron, lamp, phone)"
+         "duck, eggbox, glue, holepuncher, iron, lamp, phone)"
 )
 parser.add_argument(
     "--no_render",
@@ -105,6 +103,11 @@ parser.add_argument(
     help="To eval occlusion linemod or not."
 )
 
+parser.add_argument(
+    "--fast_run",
+    action='store_true',
+    help="If true, train will only run one batch every epoch, then it will be break."
+)
 parser.add_argument("--test", action="store_true")
 parser.add_argument("--cal_metrics", action="store_true")
 args = parser.parse_args()
@@ -155,7 +158,7 @@ def load_checkpoint(model=None, optimizer=None, filename="checkpoint"):
             checkpoint = torch.load(filename)
         except:
             checkpoint = pkl.load(open(filename, "rb"))
-        epoch = checkpoint["epoch"]
+        epoch = checkpoint["epoch"]  # add epoch here
         it = checkpoint.get("it", 0.0)
         best_prec = checkpoint["best_prec"]
         if model is not None and checkpoint["model_state"] is not None:
@@ -170,14 +173,14 @@ def load_checkpoint(model=None, optimizer=None, filename="checkpoint"):
 
 
 def model_fn_decorator(
-    criterion, criterion_of, test=False
+        criterion, criterion_of, test=False
 ):
     modelreturn = namedtuple("modelreturn", ["preds", "loss", "acc"])
     teval = TorchEval()
 
     def model_fn(
-        model, data, epoch=0, is_eval=False, is_test=False, finish_test=False,
-        obj_id=-1
+            model, data, epoch=0, is_eval=False, is_test=False, finish_test=False,
+            obj_id=-1
     ):
         if finish_test:
             teval.cal_lm_add(obj_id, test_occ=args.test_occ)
@@ -187,7 +190,7 @@ def model_fn_decorator(
         with torch.set_grad_enabled(not is_eval):
             cu_dt = [item.to("cuda", non_blocking=True) for item in data]
             rgb, pcld, cld_rgb_nrm, choose, kp_targ_ofst, ctr_targ_ofst, \
-                cls_ids, rts, labels, kp_3ds, ctr_3ds = cu_dt
+            cls_ids, rts, labels, kp_3ds, ctr_3ds = cu_dt
 
             pred_kp_of, pred_rgbd_seg, pred_ctr_of = model(
                 cld_rgb_nrm, rgb, choose
@@ -209,8 +212,8 @@ def model_fn_decorator(
 
             _, classes_rgbd = torch.max(pred_rgbd_seg, -1)
             acc_rgbd = (
-                classes_rgbd == labels
-            ).float().sum() / labels.numel()
+                               classes_rgbd == labels
+                       ).float().sum() / labels.numel()
 
             if is_test:
                 teval.eval_pose_parallel(
@@ -257,15 +260,15 @@ class Trainer(object):
     """
 
     def __init__(
-        self,
-        model,
-        model_fn,
-        optimizer,
-        checkpoint_name="ckpt",
-        best_name="best",
-        lr_scheduler=None,
-        bnm_scheduler=None,
-        viz=None,
+            self,
+            model,
+            model_fn,
+            optimizer,
+            checkpoint_name="ckpt",
+            best_name="best",
+            lr_scheduler=None,
+            bnm_scheduler=None,
+            viz=None,
     ):
         self.model, self.model_fn, self.optimizer, self.lr_scheduler, self.bnm_scheduler = (
             model,
@@ -286,10 +289,10 @@ class Trainer(object):
         eval_dict = {}
         total_loss = 0.0
         count = 1.0
-        for i, data in enumerate(d_loader):
-        # for i, data in tqdm.tqdm(
-        #     enumerate(d_loader), leave=False, desc="val"
-        # ):
+        # for i, data in enumerate(d_loader):
+        for i, data in tqdm.tqdm(
+                enumerate(d_loader), leave=False, desc="val"
+        ):
             self.optimizer.zero_grad()
 
             _, loss, eval_res = self.model_fn(
@@ -315,14 +318,14 @@ class Trainer(object):
         return total_loss / count, eval_dict
 
     def train(
-        self,
-        start_it,
-        start_epoch,
-        n_epochs,
-        train_loader,
-        test_loader=None,
-        best_loss=1e4,
-        log_epoch_f = None
+            self,
+            start_it,
+            start_epoch,
+            n_epochs,
+            train_loader,
+            test_loader=None,
+            best_loss=1e4,
+            log_epoch_f=None
     ):
         r"""
            Call to begin training the model
@@ -361,7 +364,7 @@ class Trainer(object):
         _, eval_frequency = is_to_eval(0, it)
 
         with tqdm.trange(start_epoch, n_epochs + 1, desc="epochs") as tbar, tqdm.tqdm(
-            total=eval_frequency, leave=False, desc="train"
+                total=eval_frequency, leave=False, desc="train"
         ) as pbar:
 
             for epoch in tbar:
@@ -397,7 +400,7 @@ class Trainer(object):
 
                     eval_flag, eval_frequency = is_to_eval(epoch, it)
                     # TODO: Fast run option
-                    if eval_flag or FAST_RUN:
+                    if eval_flag or args.fast_run:
                         pbar.close()
 
                         if test_loader is not None:
@@ -414,11 +417,11 @@ class Trainer(object):
                                 ),
                                 is_best,
                                 filename=self.checkpoint_name,
-                                bestname=self.best_name +'_%.4f'% val_loss,
+                                bestname=self.best_name + '_%.4f' % val_loss,
                                 bestname_pure=self.best_name,
                             )
                             info_p = self.checkpoint_name.replace(
-                                '.pth.tar','_epoch.txt'
+                                '.pth.tar', '_epoch.txt'
                             )
                             os.system(
                                 'echo {} {} >> {}'.format(
@@ -447,7 +450,7 @@ if __name__ == "__main__":
         val_ds = LM_Dataset('val', cls_type=args.cls)
         val_loader = torch.utils.data.DataLoader(
             val_ds, batch_size=config.val_mini_batch_size, shuffle=False,
-            num_workers=3232        )
+            num_workers=32)
     else:
         if args.test_occ:
             test_ds = OCC_LM_Dataset('test', cls_type=args.cls)
@@ -495,7 +498,7 @@ if __name__ == "__main__":
     lr_scheduler = CyclicLR(
         optimizer, base_lr=1e-5, max_lr=1e-3,
         step_size=config.n_total_epoch * config.num_mini_batch_per_epoch // 6,
-        mode = 'triangular'
+        mode='triangular'
     )
 
     bnm_lmbd = lambda it: max(
@@ -525,11 +528,11 @@ if __name__ == "__main__":
         model,
         model_fn,
         optimizer,
-        checkpoint_name = os.path.join(checkpoint_fd, "{}_pvn3d".format(args.cls)),
-        best_name = os.path.join(checkpoint_fd, "{}_pvn3d_best".format(args.cls)),
-        lr_scheduler = lr_scheduler,
-        bnm_scheduler = bnm_scheduler,
-        viz = viz,
+        checkpoint_name=os.path.join(checkpoint_fd, "{}_pvn3d".format(args.cls)),
+        best_name=os.path.join(checkpoint_fd, "{}_pvn3d_best".format(args.cls)),
+        lr_scheduler=lr_scheduler,
+        bnm_scheduler=bnm_scheduler,
+        viz=viz,
     )
 
     if args.eval_net:
